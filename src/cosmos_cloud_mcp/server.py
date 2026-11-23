@@ -53,6 +53,16 @@ def _dump(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=1, default=str)
 
 
+def _tail(output: Any, max_lines: int = 15) -> Any:
+    """Shorten streamed text output (image pulls, service creation) to its last lines."""
+    if not isinstance(output, str):
+        return output
+    lines = [line for line in output.splitlines() if line.strip()]
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join([f"... {len(lines) - max_lines} earlier lines omitted ..."] + lines[-max_lines:])
+
+
 def _container_summary(item: dict[str, Any]) -> dict[str, Any]:
     names = item.get("Names") or []
     name = names[0].lstrip("/") if names else item.get("Name", "").lstrip("/")
@@ -222,7 +232,7 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
         see export_container for an example)."""
         if not isinstance(service.get("services"), dict) or not service["services"]:
             raise ToolError("service must contain a non-empty 'services' object")
-        return _dump(await call("POST", "/api/docker-service", body=service))
+        return _dump(_tail(await call("POST", "/api/docker-service", body=service)))
 
     # -------------------------------------------------------- docker resources
 
@@ -244,7 +254,7 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
     @tool(Level.WRITE, "Pull image")
     async def pull_image(image: str) -> str:
         """Pull a Docker image from its registry, e.g. nginx:latest. Does not touch running containers."""
-        return _dump(await call("GET", "/api/images/pull", params={"imageName": image}, redact_output=False))
+        return _dump(_tail(await call("GET", "/api/images/pull", params={"imageName": image}, redact_output=False)))
 
     @tool(Level.DESTRUCTIVE, "Delete volume")
     async def delete_volume(name: str, confirm: bool = False) -> str:

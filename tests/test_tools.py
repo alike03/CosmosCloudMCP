@@ -229,3 +229,11 @@ async def test_raw_request_read_only_allows_reads(ro_server, api):
 async def test_raw_request_rejects_foreign_url(server, api):
     with pytest.raises(ToolError, match="full URL"):
         await call(server, "cosmos_request", method="GET", path="https://evil.test/api/status")
+
+
+async def test_streamed_output_is_shortened(server, api):
+    stream = "\n".join(f'{{"status":"Downloading","id":"{i}"}}' for i in range(100)) + "\nDone"
+    api.get("/api/images/pull").mock(return_value=httpx.Response(200, text=stream))
+    out = await call(server, "pull_image", image="nginx:latest")
+    lines = out.splitlines()
+    assert lines[0].startswith("... 86 earlier lines omitted") and lines[-1] == "Done" and len(lines) == 16
