@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="128" height="128" alt=""></p>
+
 # CosmosCloudMCP
 
 An [MCP](https://modelcontextprotocol.io) server for **[Cosmos Cloud](https://github.com/azukaar/Cosmos-Server)** (azukaar/Cosmos-Server), the self-hosted server manager and reverse proxy. It lets an MCP client such as Claude Code read and manage your Cosmos instance through its REST API: containers, reverse-proxy routes, Docker volumes and networks, backups, scheduled jobs, metrics and API tokens.
@@ -113,15 +115,14 @@ services:
       COSMOS_VERIFY_TLS: "false"
       COSMOS_TOKEN: cosmos_xxx
       COSMOS_MCP_TRANSPORT: http
-      COSMOS_MCP_HOST: 127.0.0.1
-      COSMOS_MCP_PORT: "8000"
       COSMOS_MCP_AUTH_TOKEN: replace-with-a-long-random-secret
     labels:
       cosmos-auto-update: "true"
 ```
 
-- `network_mode: host` with `COSMOS_MCP_HOST: 127.0.0.1` makes the endpoint reachable only from the server itself, and lets the container reach Cosmos at `https://localhost`.
+- `network_mode: host` with the default `COSMOS_MCP_HOST` (`127.0.0.1`) makes the endpoint reachable only from the server itself, and lets the container reach Cosmos at `https://localhost`. The port defaults to `8000`; set `COSMOS_MCP_PORT` if it is taken.
 - `cosmos-auto-update: "true"` is the label Cosmos sets when you enable auto-update for a container; new image versions are then rolled out by Cosmos.
+- The image sets only `PATH` and the `cosmos-icon` label, so Cosmos shows the logo and the environment tab lists only your own settings. Containers created from version 0.2.0 or earlier still carry the variables of the old `python` base image (`PYTHON_VERSION`, `GPG_KEY` ...), because Cosmos keeps a container's environment on updates. Delete them in the container's environment settings, or remove and re-import the container.
 - The environment variables, including both tokens, are stored in the container configuration and are visible to anyone who can inspect the container. Use a Cosmos token with only the permissions you need.
 
 Register it in Claude Code:

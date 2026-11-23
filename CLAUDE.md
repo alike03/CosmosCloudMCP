@@ -13,6 +13,7 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
 - `config.py`: settings from environment / `COSMOS_ENV_FILE`
 - `http_transport.py`: Streamable HTTP mode (stateless, JSON responses), bearer-token middleware, `/health`
 - `healthcheck.py`: Docker HEALTHCHECK (only probes in http mode)
+- `Dockerfile`: runtime on `debian:trixie-slim` (system Python 3.13, venv in `/opt/venv`) so the image adds no env vars besides `PATH`; `assets/logo.png` is the `cosmos-icon` label
 - Tests: `.venv/bin/pytest` (HTTP mocked with respx)
 
 ## Decisions
