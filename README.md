@@ -11,9 +11,17 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so.
 
 ## Install
 
-Requires a Cosmos instance with API tokens (v0.24.0 or newer). Two options:
+Requires a Cosmos instance with API tokens (v0.24.0 or newer). Three options:
 
-**Docker** (no local Python needed):
+**Prebuilt Docker image** (built by GitHub Actions for linux/amd64 and linux/arm64):
+
+```bash
+docker pull ghcr.io/alike03/cosmoscloudmcp:latest
+```
+
+Tags: `latest` (main branch), `X.Y.Z` and `X.Y` (release tags `vX.Y.Z`), `sha-<commit>`.
+
+**Build the Docker image yourself** (no local Python needed):
 
 ```bash
 git clone https://github.com/alike03/CosmosCloudMCP.git
@@ -78,8 +86,10 @@ Keep the token in the `.env` file so it does not end up in the Claude Code confi
 
 ```bash
 claude mcp add cosmos --scope user -- \
-  docker run -i --rm --env-file /path/to/CosmosCloudMCP/.env cosmos-cloud-mcp
+  docker run -i --rm --env-file /path/to/.env ghcr.io/alike03/cosmoscloudmcp:latest
 ```
+
+Use `cosmos-cloud-mcp` instead of the `ghcr.io/...` name if you built the image yourself.
 
 `docker run --env-file` takes values literally, so write them without quotes in `.env`. If Cosmos runs on the same host and you use `COSMOS_URL=https://localhost`, add `--network host` (inside the container `localhost` is the container itself) and set `COSMOS_VERIFY_TLS=false` if the certificate is not issued for `localhost`.
 
