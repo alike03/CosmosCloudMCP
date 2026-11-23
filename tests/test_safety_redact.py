@@ -25,6 +25,13 @@ from cosmos_cloud_mcp.safety import Level, classify, normalize_path
         ("POST", "/api/api-tokens", Level.DESTRUCTIVE),
         ("POST", "/api/users", Level.DESTRUCTIVE),
         ("GET", "/api/api-tokens", Level.READ),
+        ("PUT", "/api/config", Level.DESTRUCTIVE),
+        ("GET", "/api/config", Level.READ),
+        ("GET", "/api/notifications/read", Level.WRITE),
+        ("GET", "/api/mfa", Level.WRITE),
+        ("POST", "/api/migrate-host", Level.DESTRUCTIVE),
+        ("POST", "/api/register", Level.DESTRUCTIVE),
+        ("POST", "/api/constellation/registries/r1/tokens", Level.DESTRUCTIVE),
     ],
 )
 def test_classify(method, path, level):
@@ -46,7 +53,8 @@ def test_normalize_path(raw, expected):
 
 @pytest.mark.parametrize(
     "raw",
-    ["https://evil.test/api/status", "//evil.test/api", "/api/../admin", "/api/%2e%2e/x", "/other", "/api/status?x=1"],
+    ["https://evil.test/api/status", "//evil.test/api", "/api/../admin", "/api/%2e%2e/x", "/other", "/api/status?x=1",
+     "/api/servapps/web%2Fmanage%2Fremove", "/api/servapps/web%5cmanage"],
 )
 def test_normalize_path_rejects(raw):
     with pytest.raises(ValueError):
@@ -72,3 +80,20 @@ def test_redact_nested_secrets_and_env():
     assert out["tokens"]["mytoken"]["tokenSuffix"] == "abcd"
     assert out["envVars"] == {"KEY": REDACTED}
     assert data["EmailConfig"]["Password"] == "x"  # input untouched
+
+
+def test_redact_tls_keys_and_secret_records():
+    data = {
+        "HTTPConfig": {"tlskey": "-----BEGIN", "selfTLSKey": "k", "OIDCSigningKey": "s", "tlscert": "cert",
+                       "ZoneCerts": {"z": {"tlskey": "k2", "tlscert": "c2"}}},
+        "secrets": [{"name": "API", "value": "v", "availableToPRs": False}],
+        "env": [{"name": "DB_PASS", "value": "x"}],
+    }
+    out = redact(data)
+    assert out["HTTPConfig"]["tlskey"] == REDACTED
+    assert out["HTTPConfig"]["selfTLSKey"] == REDACTED
+    assert out["HTTPConfig"]["OIDCSigningKey"] == REDACTED
+    assert out["HTTPConfig"]["tlscert"] == "cert"
+    assert out["HTTPConfig"]["ZoneCerts"]["z"] == {"tlskey": REDACTED, "tlscert": "c2"}
+    assert out["secrets"] == [{"name": "API", "value": REDACTED, "availableToPRs": False}]
+    assert out["env"] == [{"name": "DB_PASS", "value": REDACTED}]

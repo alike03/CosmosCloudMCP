@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cosmos-cloud-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "MCP server for Cosmos Cloud (azukaar/Cosmos-Server): manage containers, routes, backups and jobs from an MCP client."
 readme = "README.md"
 license = "MIT"

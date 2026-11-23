@@ -24,6 +24,7 @@ def test_url_with_cosmos_suffix_is_not_doubled():
         ({"COSMOS_URL": "https://c.test"}, "COSMOS_TOKEN is not set"),
         ({"COSMOS_URL": "https://c.test", "COSMOS_TOKEN": "abc"}, "prefix"),
         ({"COSMOS_URL": "https://c.test", "COSMOS_TOKEN": "cosmos_a", "COSMOS_READ_ONLY": "maybe"}, "true or false"),
+        ({"COSMOS_URL": "https://c.test", "COSMOS_TOKEN": "cosmos_a", "COSMOS_TIMEOUT": "0"}, "positive"),
     ],
 )
 def test_from_env_errors(env, message):

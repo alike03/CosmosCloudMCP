@@ -44,6 +44,9 @@ def _seg(value: str) -> str:
     """Quote a value for use as one URL path segment."""
     if not value or not str(value).strip():
         raise ToolError("identifier must not be empty")
+    if str(value) in {".", ".."}:
+        # quote() keeps dots and the HTTP client resolves dot segments, which would change the endpoint.
+        raise ToolError("identifier must not be '.' or '..'")
     return quote(str(value), safe="")
 
 
@@ -527,7 +530,9 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
             raise ToolError(f"{method} {clean} is a {level.value} request and COSMOS_READ_ONLY is enabled")
         if level is Level.DESTRUCTIVE and not confirm:
             return _dump(preview(f"send {method} {clean}", {"query": query, "body": body, "level": level.value}))
-        return _dump(await call(method, clean, params=query, body=body))
+        # Classification uses the path without trailing slash; some routes (container inspect) need it.
+        send_path = clean + "/" if path.strip().endswith("/") and not clean.endswith("/") else clean
+        return _dump(await call(method, send_path, params=query, body=body))
 
     return mcp
 

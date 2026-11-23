@@ -11,13 +11,15 @@ REDACTED = "***redacted***"
 _SECRET_KEY = re.compile(
     r"(pass(word|wd|phrase)?$|password|secret|token|api[_-]?key|private[_-]?key|privkey|"
     r"credential|jwt|auth[_-]?key|encryption[_-]?key|mongodb|smtp[_-]?pass|salt$|"
-    r"access[_-]?key|session[_-]?key)",
+    r"access[_-]?key|session[_-]?key|tls[_-]?key$|signing[_-]?key$|register[_-]?key$)",
     re.IGNORECASE,
 )
 # Keys that match the pattern above but are safe to show.
 _SAFE_KEYS = {"tokensuffix", "tokenname", "tokens", "apitokens"}
 # Keys that hold environment variables, as ["KEY=VALUE", ...] or {"KEY": "VALUE"}.
 _ENV_KEYS = {"env", "envvars", "environment"}
+# Field holding the secret in name/value records, e.g. CI secrets [{"name": ..., "value": ...}].
+_VALUE_KEY = "value"
 
 
 def _is_secret_key(key: str) -> bool:
@@ -32,11 +34,27 @@ def _redact_env(value: Any) -> Any:
             if isinstance(item, str) and "=" in item:
                 name = item.split("=", 1)[0]
                 out.append(f"{name}={REDACTED}")
+            elif isinstance(item, dict):
+                out.append(_redact_values(redact(item)))
             else:
                 out.append(item)
         return out
     if isinstance(value, dict):
         return {k: (REDACTED if isinstance(v, str) and v else v) for k, v in value.items()}
+    return value
+
+
+def _redact_values(value: Any) -> Any:
+    """Redact the ``value`` field of name/value records (dicts or lists of dicts)."""
+    if isinstance(value, list):
+        return [_redact_values(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            k: (REDACTED if isinstance(v, str) and v else v)
+            if str(k).lower() == _VALUE_KEY
+            else _redact_values(v)
+            for k, v in value.items()
+        }
     return value
 
 
@@ -55,6 +73,8 @@ def redact(value: Any) -> Any:
                 out[key] = _redact_env(redact(item) if isinstance(item, dict) else item)
             elif isinstance(item, str) and item and _is_secret_key(skey):
                 out[key] = REDACTED
+            elif isinstance(item, (list, dict)) and _is_secret_key(skey):
+                out[key] = _redact_values(redact(item))
             else:
                 out[key] = redact(item)
         return out

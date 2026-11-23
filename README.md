@@ -169,7 +169,7 @@ Check the connection with `claude mcp list` or `/mcp` inside Claude Code. Other 
 
 `COSMOS_READ_ONLY=true` does not register write and destructive tools at all.
 
-`cosmos_request` is an escape hatch for endpoints without a dedicated tool (for example `GET /api/cron`). It applies the same levels: it classifies the method and path (several Cosmos endpoints change state via GET, such as `manage/{action}` or `/api/restart`), refuses non-read requests in read-only mode and requires `confirm=true` for destructive ones (any `DELETE`, restarts, restores, kill/remove, token and user management). It only reaches paths under `/cosmos/api/` on the configured host.
+`cosmos_request` is an escape hatch for endpoints without a dedicated tool (for example `GET /api/cron`). It applies the same levels: it classifies the method and path (several Cosmos endpoints change state via GET, such as `manage/{action}` or `/api/restart`), refuses non-read requests in read-only mode and requires `confirm=true` for destructive ones (any `DELETE`, restarts, restores, kill/remove, token and user management, replacing the Cosmos configuration with `PUT /api/config`). It only reaches paths under `/cosmos/api/` on the configured host.
 
 Tool annotations (`readOnlyHint`, `destructiveHint`) are set accordingly, so clients can apply their own policies.
 

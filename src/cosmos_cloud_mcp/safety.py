@@ -28,6 +28,13 @@ _DESTRUCTIVE_PATHS = [
     r"^/api/disks/.*$",
     r"^/api/(mount|unmount|merge)$",
     r"^/api/users(/.*)?/(reset-2fa|reset-password)$",
+    # Recreates the Cosmos container (a restart) or reprovisions/rejoins the server.
+    r"^/api/migrate-host$",
+    r"^/api/setup(-join)?$",
+    r"^/api/constellation/connect$",
+    # User management outside /api/users and minting of registry deploy tokens.
+    r"^/api/(register|invite|password-reset)$",
+    r"^/api/constellation/registries/[^/]+/tokens(/.*)?$",
 ]
 
 # GET endpoints that change state even though they use GET.
@@ -38,6 +45,8 @@ _MUTATING_GET_PATHS = [
     r"^/api/force-server-update$",
     r"^/api/upgrade.*$",
     r"^/api/newInstall$",
+    r"^/api/notifications/read$",
+    r"^/api/mfa$",
 ]
 
 # POST endpoints that only read.
@@ -45,8 +54,10 @@ _READ_ONLY_POSTS = [
     r"^/api/jobs/get$",
 ]
 
-# Non-GET methods on these paths are destructive (token and user management).
+# Non-GET methods on these paths are destructive (token and user management, and
+# the config endpoint, whose PUT replaces the whole Cosmos configuration).
 _DESTRUCTIVE_WRITES = [
+    r"^/api/config$",
     r"^/api/api-tokens(/.*)?$",
     r"^/api/users(/.*)?$",
 ]
@@ -74,8 +85,12 @@ def normalize_path(path: str) -> str:
     if p.startswith("/cosmos/"):
         p = p[len("/cosmos") :]
     segments = p.split("/")
-    if any(s in {".", ".."} for s in segments) or "%2e" in p.lower() or "\\" in p:
+    lowered = p.lower()
+    if any(s in {".", ".."} for s in segments) or "%2e" in lowered or "\\" in p:
         raise ValueError("path traversal is not allowed")
+    if "%2f" in lowered or "%5c" in lowered:
+        # Cosmos decodes these into path separators, which would bypass the classification.
+        raise ValueError("encoded slashes are not allowed in the path")
     if not p.startswith("/api/"):
         raise ValueError("path must start with /api/")
     return p.rstrip("/") if p != "/api/" else p

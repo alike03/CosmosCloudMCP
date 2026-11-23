@@ -97,6 +97,8 @@ class Settings:
             timeout = float(env.get("COSMOS_TIMEOUT", "30") or 30)
         except ValueError as exc:
             raise ConfigError("COSMOS_TIMEOUT must be a number of seconds") from exc
+        if not 0 < timeout < float("inf"):
+            raise ConfigError("COSMOS_TIMEOUT must be a positive number of seconds")
 
         transport = (env.get("COSMOS_MCP_TRANSPORT") or "stdio").strip().lower()
         if transport == "streamable-http":

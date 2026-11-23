@@ -69,6 +69,18 @@ async def test_path_segments_are_quoted(server, api):
     assert route.called
 
 
+async def test_dot_segment_identifiers_are_rejected(server, api):
+    with pytest.raises(ToolError, match="'.' or '..'"):
+        await call(server, "forget_snapshot", name="b1", snapshot="..", confirm=True)
+    assert len(api.calls) == 0
+
+
+async def test_cosmos_request_keeps_trailing_slash(server, api):
+    route = api.get("/api/servapps/web/").mock(return_value=httpx.Response(200, json=ok({})))
+    await call(server, "cosmos_request", method="GET", path="/api/servapps/web/")
+    assert route.called
+
+
 async def test_logs_params(server, api):
     route = api.get("/api/servapps/web/logs").mock(return_value=httpx.Response(200, json=ok(["line"])))
     await call(server, "get_container_logs", container="web", limit=5000, errors_only=True)
