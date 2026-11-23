@@ -38,6 +38,7 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
 - `GET /api/config` needs only login; Cosmos masks credentials without permission 40.
 - Restore body: `{snapshotId, target, include?}` (`RestoreBackupRoute` in `src/backups/API.go`), runs as a background job.
 - `manage/remove` uses Docker `RemoveOptions{}`: no force, volumes kept.
+- Container updates (auto-update, `servapps/{id}/update`) keep the old container's entrypoint, healthcheck, env and labels; `envVars` replaces the env list. Image changes must keep the bare names `cosmos-cloud-mcp` and `python` resolvable.
 - Full spec: `docs/api/openapi-v0.24.0.json`.
 
 ## Rules
