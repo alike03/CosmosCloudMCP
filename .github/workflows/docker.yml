@@ -55,6 +55,11 @@ jobs:
 
       - id: meta
         uses: docker/metadata-action@v6
+        env:
+          # OCI metadata goes into manifest annotations, not image labels:
+          # Cosmos copies a container's labels on every update, so labels like
+          # version or revision would go stale on installed containers.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -70,6 +75,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,mode=max,scope=runtime
