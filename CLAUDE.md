@@ -30,6 +30,7 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
 - API tokens skip the sudo check: only the token's permission list is checked (`CheckPermissions` in `src/utils/loggedIn.go`). Missing permission returns HTTP 403 with code `AT003`.
 - Token permissions: 1 ADMIN_READ, 2 ADMIN, 10 USERS_READ, 11 USERS, 20 RESOURCES_READ, 21 RESOURCES, 30 CONFIGURATION_READ, 31 CONFIGURATION, 40 CREDENTIALS_READ, 100/101 LOGIN/LOGIN_WEAK.
 - A token cannot be granted permissions its creator lacks (`AT016`).
+- Web UI (Management > Configuration > API) has no permission picker: Read Only off = `DefaultAdminTokenPermissions` (all 9), on = 1, 10, 20, 30. Custom lists only via `POST /api/api-tokens`.
 - `GET /api/config` needs only login; Cosmos masks credentials without permission 40.
 - Restore body: `{snapshotId, target, include?}` (`RestoreBackupRoute` in `src/backups/API.go`), runs as a background job.
 - `manage/remove` uses Docker `RemoveOptions{}`: no force, volumes kept.

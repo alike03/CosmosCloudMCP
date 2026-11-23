@@ -183,7 +183,7 @@ async def test_permission_error_is_tool_error_with_hint(server, api):
     with pytest.raises(ToolError) as info:
         await call(server, "list_users")
     msg = str(info.value)
-    assert "403" in msg and "AT003" in msg and "Settings > API Tokens" in msg
+    assert "403" in msg and "AT003" in msg and "Management > Configuration > API" in msg
     assert TOKEN not in msg
 
 

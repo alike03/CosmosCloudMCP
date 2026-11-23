@@ -81,7 +81,7 @@ class Settings:
         if not url.startswith(("http://", "https://")):
             raise ConfigError("COSMOS_URL must start with http:// or https://")
         if not token:
-            raise ConfigError("COSMOS_TOKEN is not set (create one in Cosmos: Settings > API Tokens)")
+            raise ConfigError("COSMOS_TOKEN is not set (create one in Cosmos: Management > Configuration > API)")
         if not token.startswith("cosmos_"):
             raise ConfigError("COSMOS_TOKEN does not look like a Cosmos API token (expected prefix 'cosmos_')")
 

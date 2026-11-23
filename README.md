@@ -40,7 +40,16 @@ python3 -m venv .venv
 
 ## Create an API token
 
-In the Cosmos UI open **Settings > API Tokens** and create a token. Grant only what you want the MCP client to be able to do:
+In the Cosmos web UI open **Management > Configuration**, tab **API**, and click **New Token**. Set an expiry and, if possible, an IP whitelist.
+
+The web form has no per-permission selection, only the **Read Only** switch:
+
+| Form setting | Permissions granted | Effect on this server |
+|---|---|---|
+| Read Only **off** (default, shown as "Full Access") | all: 1, 2, 10, 11, 20, 21, 30, 31, 40 | every tool works; includes user management (11) and unmasked credentials (40) |
+| Read Only **on** | 1, 10, 20, 30 | read tools work, write tools fail with HTTP 403 `AT003`; pair it with `COSMOS_READ_ONLY=true` |
+
+A token with a custom permission list can only be created through the API, for example with this server's `create_api_token` tool (using a Full Access token once), and Cosmos refuses to grant permissions the creating token does not hold (`AT016`). Permission ids:
 
 | id | Permission | Needed for |
 |---|---|---|
@@ -52,15 +61,14 @@ In the Cosmos UI open **Settings > API Tokens** and create a token. Grant only w
 | 21 | RESOURCES | container actions, volumes/networks, backups, jobs |
 | 30 | CONFIGURATION_READ | routes; without it `get_config` hides admin-only routes |
 | 31 | CONFIGURATION | create/update/delete routes |
-| 40 | CREDENTIALS_READ | unmasked passwords, env vars and secrets; not needed, leave it out |
+| 40 | CREDENTIALS_READ | unmasked passwords, env vars and secrets; not needed |
 
-Recommended sets:
+Useful custom sets:
 
-- **Read only:** 1, 10, 20, 30
 - **Day-to-day management:** 1, 10, 20, 21, 30, 31
-- **Full (including restart and token management):** 1, 2, 10, 20, 21, 30, 31
+- **Everything this server uses, without user management and credentials:** 1, 2, 10, 20, 21, 30, 31
 
-API tokens bypass the sudo check of the web UI; only the token's permission list counts. A missing permission returns HTTP 403 with code `AT003`, which the tools report together with a hint. Consider setting an expiry and an IP whitelist on the token.
+API tokens bypass the sudo check of the web UI; only the token's permission list counts. A missing permission returns HTTP 403 with code `AT003`, which the tools report together with a hint. With a Full Access token Cosmos returns credentials unmasked; this server still redacts them by field name (`COSMOS_REDACT_SECRETS=true`), but a narrower token is the better protection.
 
 ## Configuration
 

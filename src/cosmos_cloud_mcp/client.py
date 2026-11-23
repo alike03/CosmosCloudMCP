@@ -26,7 +26,7 @@ class CosmosAPIError(Exception):
 
 
 _HINTS = {
-    "AT003": "the API token lacks a permission for this endpoint; grant it in Cosmos under Settings > API Tokens",
+    "AT003": "the API token lacks a permission for this endpoint; a Read Only token cannot write, create a token with the needed permissions (Management > Configuration > API, or the create_api_token tool)",
 }
 
 
