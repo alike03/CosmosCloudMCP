@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+MIN_AUTH_TOKEN_LENGTH = 24
+
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -58,6 +60,12 @@ class Settings:
     verify_tls: bool = True
     redact_secrets: bool = True
     timeout: float = 30.0
+    transport: str = "stdio"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8000
+    http_path: str = "/mcp"
+    http_auth_token: str = ""
+    http_allowed_hosts: tuple[str, ...] = ()
 
     @property
     def api_base(self) -> str:
@@ -90,6 +98,35 @@ class Settings:
         except ValueError as exc:
             raise ConfigError("COSMOS_TIMEOUT must be a number of seconds") from exc
 
+        transport = (env.get("COSMOS_MCP_TRANSPORT") or "stdio").strip().lower()
+        if transport == "streamable-http":
+            transport = "http"
+        if transport not in {"stdio", "http"}:
+            raise ConfigError("COSMOS_MCP_TRANSPORT must be stdio or http")
+
+        http_host = (env.get("COSMOS_MCP_HOST") or "127.0.0.1").strip()
+        try:
+            http_port = int(env.get("COSMOS_MCP_PORT") or 8000)
+        except ValueError as exc:
+            raise ConfigError("COSMOS_MCP_PORT must be a port number") from exc
+        if not 1 <= http_port <= 65535:
+            raise ConfigError("COSMOS_MCP_PORT must be between 1 and 65535")
+        http_path = (env.get("COSMOS_MCP_PATH") or "/mcp").strip()
+        if not http_path.startswith("/") or http_path == "/health":
+            raise ConfigError("COSMOS_MCP_PATH must start with / and must not be /health")
+        http_auth_token = (env.get("COSMOS_MCP_AUTH_TOKEN") or "").strip()
+        if transport == "http":
+            if not http_auth_token:
+                raise ConfigError(
+                    "COSMOS_MCP_AUTH_TOKEN is required in http mode; generate one with: "
+                    "python3 -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                )
+            if len(http_auth_token) < MIN_AUTH_TOKEN_LENGTH:
+                raise ConfigError(f"COSMOS_MCP_AUTH_TOKEN must be at least {MIN_AUTH_TOKEN_LENGTH} characters long")
+        allowed_hosts = tuple(
+            h.strip() for h in (env.get("COSMOS_MCP_ALLOWED_HOSTS") or "").split(",") if h.strip()
+        )
+
         return cls(
             url=url,
             token=token,
@@ -97,10 +134,18 @@ class Settings:
             verify_tls=_parse_bool("COSMOS_VERIFY_TLS", env.get("COSMOS_VERIFY_TLS"), True),
             redact_secrets=_parse_bool("COSMOS_REDACT_SECRETS", env.get("COSMOS_REDACT_SECRETS"), True),
             timeout=timeout,
+            transport=transport,
+            http_host=http_host,
+            http_port=http_port,
+            http_path=http_path,
+            http_auth_token=http_auth_token,
+            http_allowed_hosts=allowed_hosts,
         )
 
     def __repr__(self) -> str:  # never expose the token in logs or tracebacks
         return (
             f"Settings(url={self.url!r}, token='***', read_only={self.read_only}, "
-            f"verify_tls={self.verify_tls}, redact_secrets={self.redact_secrets}, timeout={self.timeout})"
+            f"verify_tls={self.verify_tls}, redact_secrets={self.redact_secrets}, timeout={self.timeout}, "
+            f"transport={self.transport!r}, http_host={self.http_host!r}, http_port={self.http_port}, "
+            f"http_path={self.http_path!r}, http_auth_token='***', http_allowed_hosts={self.http_allowed_hosts})"
         )

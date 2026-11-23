@@ -538,7 +538,13 @@ def main() -> None:
     except ConfigError as exc:
         print(f"cosmos-cloud-mcp: configuration error: {exc}", file=sys.stderr)
         raise SystemExit(2) from None
-    build_server(settings).run()
+    server = build_server(settings)
+    if settings.transport == "http":
+        from .http_transport import run_http
+
+        run_http(server, settings)
+    else:
+        server.run()
 
 
 if __name__ == "__main__":

@@ -19,4 +19,8 @@ RUN pip install . \
     && rm -rf /app/src \
     && useradd --system --uid 10001 --no-create-home mcp
 USER mcp
+# stdio by default; set COSMOS_MCP_TRANSPORT=http to serve MCP over HTTP on COSMOS_MCP_PORT
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-m", "cosmos_cloud_mcp.healthcheck"]
 ENTRYPOINT ["cosmos-cloud-mcp"]

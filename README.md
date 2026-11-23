@@ -4,7 +4,8 @@ An [MCP](https://modelcontextprotocol.io) server for **[Cosmos Cloud](https://gi
 
 Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so.
 
-- Python, official MCP Python SDK v2 (`MCPServer`), stdio transport
+- Python, official MCP Python SDK v2 (`MCPServer`)
+- Two transports: **HTTP** (run it once as a service, e.g. in Cosmos itself, with auto-update) or **stdio** (the MCP client starts it per session)
 - Read and write tools in three safety levels, plus a global read-only switch
 - Secrets (passwords, tokens, environment variable values) are redacted in responses
 - Built and tested against Cosmos **v0.24.0**; other versions may work if the API is unchanged
@@ -83,23 +84,69 @@ Environment variables:
 | `COSMOS_REDACT_SECRETS` | `true` | `false` returns passwords and env var values unmodified |
 | `COSMOS_TIMEOUT` | `30` | Request timeout in seconds |
 | `COSMOS_ENV_FILE` | unset | Path to a `.env` file with the variables above; variables set in the environment take precedence |
+| `COSMOS_MCP_TRANSPORT` | `stdio` | `http` serves MCP over Streamable HTTP |
+| `COSMOS_MCP_AUTH_TOKEN` | required for `http` | Bearer secret clients must send, at least 24 characters. Generate one with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'` |
+| `COSMOS_MCP_HOST` | `127.0.0.1` | Address the HTTP server binds to |
+| `COSMOS_MCP_PORT` | `8000` | HTTP port |
+| `COSMOS_MCP_PATH` | `/mcp` | Path of the MCP endpoint |
+| `COSMOS_MCP_ALLOWED_HOSTS` | unset | Comma-separated `host:port` values accepted in the `Host` header when not bound to loopback (DNS-rebinding protection) |
 
 Copy `.env.example` to `.env`, fill it in and keep it out of version control.
 
-## Register with Claude Code
+## Run as a service (HTTP)
 
-Keep the token in the `.env` file so it does not end up in the Claude Code config.
+In HTTP mode one long-running container serves all MCP clients. The endpoint is `http://<host>:<port>/mcp` and every request needs `Authorization: Bearer <COSMOS_MCP_AUTH_TOKEN>`. `GET /health` answers without authentication. The server is stateless, so clients keep working across restarts and image updates.
+
+### In Cosmos
+
+In Cosmos open **ServApps**, choose **Import Compose File** and paste this, with your own values:
+
+```yaml
+services:
+  cosmos-mcp:
+    image: ghcr.io/alike03/cosmoscloudmcp:latest
+    container_name: cosmos-mcp
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      COSMOS_URL: https://localhost
+      COSMOS_VERIFY_TLS: "false"
+      COSMOS_TOKEN: cosmos_xxx
+      COSMOS_MCP_TRANSPORT: http
+      COSMOS_MCP_HOST: 127.0.0.1
+      COSMOS_MCP_PORT: "8000"
+      COSMOS_MCP_AUTH_TOKEN: replace-with-a-long-random-secret
+    labels:
+      cosmos-auto-update: "true"
+```
+
+- `network_mode: host` with `COSMOS_MCP_HOST: 127.0.0.1` makes the endpoint reachable only from the server itself, and lets the container reach Cosmos at `https://localhost`.
+- `cosmos-auto-update: "true"` is the label Cosmos sets when you enable auto-update for a container; new image versions are then rolled out by Cosmos.
+- The environment variables, including both tokens, are stored in the container configuration and are visible to anyone who can inspect the container. Use a Cosmos token with only the permissions you need.
+
+Register it in Claude Code:
+
+```bash
+claude mcp add --transport http cosmos http://127.0.0.1:8000/mcp --scope user \
+  --header "Authorization: Bearer <COSMOS_MCP_AUTH_TOKEN>"
+```
+
+### Access from other machines
+
+Bind to all interfaces with `COSMOS_MCP_HOST: 0.0.0.0` and list the host names clients use in `COSMOS_MCP_ALLOWED_HOSTS` (e.g. `myserver.lan:8000`). Plain HTTP sends the bearer token unencrypted, so only do this on a trusted network or VPN (for example Cosmos Constellation), or put the endpoint behind an HTTPS route that is restricted to your LAN. Never expose it to the internet: whoever holds the bearer token can manage your containers.
+
+## Run per session (stdio)
+
+The MCP client starts the server for each session and talks to it over stdin/stdout; nothing listens on the network. Keep the Cosmos token in the `.env` file so it does not end up in the client configuration.
 
 **Docker:**
 
 ```bash
 claude mcp add cosmos --scope user -- \
-  docker run -i --rm --env-file /path/to/.env ghcr.io/alike03/cosmoscloudmcp:latest
+  docker run -i --rm --pull always --env-file /path/to/.env ghcr.io/alike03/cosmoscloudmcp:latest
 ```
 
-Use `cosmos-cloud-mcp` instead of the `ghcr.io/...` name if you built the image yourself.
-
-`docker run --env-file` takes values literally, so write them without quotes in `.env`. If Cosmos runs on the same host and you use `COSMOS_URL=https://localhost`, add `--network host` (inside the container `localhost` is the container itself) and set `COSMOS_VERIFY_TLS=false` if the certificate is not issued for `localhost`.
+`--pull always` fetches new image versions when a session starts. `docker run --env-file` takes values literally, so write them without quotes in `.env`. If Cosmos runs on the same host and you use `COSMOS_URL=https://localhost`, add `--network host` and set `COSMOS_VERIFY_TLS=false` if the certificate is not issued for `localhost`. Use `cosmos-cloud-mcp` instead of the `ghcr.io/...` name if you built the image yourself.
 
 **Python package:**
 
@@ -109,9 +156,7 @@ claude mcp add cosmos --scope user \
   -- /path/to/CosmosCloudMCP/.venv/bin/cosmos-cloud-mcp
 ```
 
-Alternatively pass the variables directly with `-e COSMOS_URL=... -e COSMOS_TOKEN=...`. Check the connection with `claude mcp list` or `/mcp` inside Claude Code.
-
-Other MCP clients: run the Docker command or `.venv/bin/cosmos-cloud-mcp` as a stdio server with the same environment variables.
+Check the connection with `claude mcp list` or `/mcp` inside Claude Code. Other MCP clients: use the HTTP endpoint, or run the Docker command / `.venv/bin/cosmos-cloud-mcp` as a stdio server with the same environment variables.
 
 ## Safety levels
 

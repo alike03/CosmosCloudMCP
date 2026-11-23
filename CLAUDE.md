@@ -11,6 +11,8 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
 - `safety.py`: levels and classification for the `cosmos_request` escape hatch
 - `redact.py`: secret redaction in responses
 - `config.py`: settings from environment / `COSMOS_ENV_FILE`
+- `http_transport.py`: Streamable HTTP mode (stateless, JSON responses), bearer-token middleware, `/health`
+- `healthcheck.py`: Docker HEALTHCHECK (only probes in http mode)
 - Tests: `.venv/bin/pytest` (HTTP mocked with respx)
 
 ## Decisions
@@ -20,6 +22,7 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
   1. Read tools: always available.
   2. Write tools (start/stop/restart/update container, create/edit route, run job, ...): run directly; the client's per-tool permission prompt is the approval.
   3. Destructive tools: require `confirm=true`, otherwise return a description of what would happen. Remove container, delete volume/route/network, restore backup, forget snapshot, restart Cosmos, create/delete API token.
+- **Transports:** `stdio` (default) or `http` (`COSMOS_MCP_TRANSPORT=http`, requires `COSMOS_MCP_AUTH_TOKEN`, binds 127.0.0.1 by default).
 - **Kill switch:** `COSMOS_READ_ONLY=true` does not register write tools.
 - Target Cosmos version: **0.24.0**.
 
