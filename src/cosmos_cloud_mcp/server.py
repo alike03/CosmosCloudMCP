@@ -50,6 +50,128 @@ def _seg(value: str) -> str:
     return quote(str(value), safe="")
 
 
+def _merge_env(
+    current: list[str], values: dict[str, str], remove: list[str]
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Apply ``values`` (set) and ``remove`` (unset) to a Docker ``KEY=VALUE`` list.
+
+    Keeps the order and every other entry untouched; new keys are appended. Returns the new
+    list and the affected key names (never values).
+    """
+    for key in [*values, *remove]:
+        if not isinstance(key, str) or not key.strip() or "=" in key or "\n" in key:
+            raise ToolError(f"invalid environment variable name: {key!r}")
+    if both := sorted(set(values) & set(remove)):
+        raise ToolError(f"variables both set and removed: {', '.join(both)}")
+    for key, value in values.items():
+        if not isinstance(value, str):
+            raise ToolError(f"value of {key} must be a string")
+
+    pending = dict(values)
+    to_remove = set(remove)
+    changes: dict[str, list[str]] = {"changed": [], "unchanged": [], "added": [], "removed": [], "not_found": []}
+    merged: list[str] = []
+    for entry in current:
+        key, sep, old = entry.partition("=")
+        if key in to_remove:
+            changes["removed"].append(key)
+            continue
+        if key in pending:
+            new = pending.pop(key)
+            changes["unchanged" if sep and old == new else "changed"].append(key)
+            merged.append(f"{key}={new}")
+            continue
+        merged.append(entry)
+    for key, value in pending.items():
+        changes["added"].append(key)
+        merged.append(f"{key}={value}")
+    changes["not_found"] = sorted(to_remove - set(changes["removed"]))
+    return merged, changes
+
+
+def _current_mounts(inspect: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Explicit mounts of a container as ``mount.Mount`` dicts (the form Cosmos accepts).
+
+    Cosmos sets ``HostConfig.Mounts`` to the given list and empties ``HostConfig.Binds``, so
+    binds are converted and kept. Returns the list and the number of converted binds.
+    """
+    host = inspect.get("HostConfig") or {}
+    mounts = [dict(m) for m in host.get("Mounts") or [] if isinstance(m, dict)]
+    binds = [b for b in host.get("Binds") or [] if isinstance(b, str) and b]
+    for bind in binds:
+        source, _, rest = bind.partition(":")
+        target, _, opts = rest.partition(":")
+        if not target:
+            raise ToolError(f"cannot read bind {bind!r}, change mounts with update_container_settings")
+        mounts.append({
+            "Type": "bind" if source.startswith("/") else "volume",
+            "Source": source,
+            "Target": target,
+            "ReadOnly": "ro" in opts.split(","),
+        })
+    return mounts, len(binds)
+
+
+_MOUNT_TYPES = {"bind", "volume", "tmpfs"}
+
+
+def _merge_mounts(
+    current: list[dict[str, Any]], add: list[dict[str, Any]], remove: list[str]
+) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
+    """Add/replace mounts by target and remove mounts by target; keeps order and options."""
+    new: dict[str, dict[str, Any]] = {}
+    for item in add:
+        if not isinstance(item, dict):
+            raise ToolError("each entry in add must be an object with source and target")
+        target = str(item.get("target") or "").rstrip("/") or "/"
+        kind = str(item.get("type") or "bind")
+        source = str(item.get("source") or "")
+        if not PurePosixPath(target).is_absolute() or target == "/":
+            raise ToolError(f"target must be an absolute path inside the container: {target!r}")
+        if kind not in _MOUNT_TYPES:
+            raise ToolError(f"type must be one of {sorted(_MOUNT_TYPES)}")
+        if kind == "bind" and not PurePosixPath(source).is_absolute():
+            raise ToolError(f"source of a bind mount must be an absolute host path: {source!r}")
+        if kind == "volume" and not source:
+            raise ToolError("source of a volume mount is the volume name")
+        if target in new:
+            raise ToolError(f"target given twice: {target}")
+        new[target] = {"Type": kind, "Source": source, "Target": target, "ReadOnly": bool(item.get("read_only"))}
+    targets = {t.rstrip("/") or "/" for t in remove}
+    if both := sorted(targets & set(new)):
+        raise ToolError(f"targets both added and removed: {', '.join(both)}")
+
+    changes: dict[str, list[str]] = {"added": [], "replaced": [], "unchanged": [], "removed": [], "not_found": []}
+    merged: list[dict[str, Any]] = []
+    for mount in current:
+        target = str(mount.get("Target") or "").rstrip("/") or "/"
+        if target in targets:
+            changes["removed"].append(target)
+            continue
+        if target in new:
+            wanted = new.pop(target)
+            same = all(mount.get(k, False if k == "ReadOnly" else "") == v for k, v in wanted.items())
+            changes["unchanged" if same else "replaced"].append(target)
+            merged.append(mount if same else wanted)
+            continue
+        merged.append(mount)
+    for target, mount in new.items():
+        changes["added"].append(target)
+        merged.append(mount)
+    changes["not_found"] = sorted(targets - set(changes["removed"]))
+    return merged, changes
+
+
+def _check_crontab(crontab: str) -> str:
+    """Cosmos parses custom job schedules with a seconds field (six fields) or @descriptors."""
+    value = crontab.strip()
+    if value.startswith("@") or len(value.split()) == 6:
+        return value
+    raise ToolError(
+        "crontab needs six fields including seconds, e.g. '0 0 3 * * *' for 03:00 daily, or a descriptor like '@daily'"
+    )
+
+
 def _dump(data: Any) -> str:
     if isinstance(data, str):
         return data
@@ -223,10 +345,76 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
         """Change container settings; Cosmos applies them by recreating the container.
         Accepted keys (docker.ContainerForm): image, restartPolicy, envVars (list of KEY=VALUE),
         labels, portBindings, Volumes, networkMode, devices, dns, user, cpus, memLimit, interactive.
-        Only send the keys to change."""
+        Only send the keys to change. envVars and Volumes replace the whole list: prefer
+        set_container_env and set_container_mounts, which change single entries.
+        The healthcheck, entrypoint and command cannot be changed here: Cosmos keeps them."""
         if not settings_patch:
             raise ToolError("settings_patch must not be empty")
         return _dump(await call("POST", f"/api/servapps/{_seg(container)}/update", body=settings_patch))
+
+    @tool(Level.WRITE, "Set container environment variables")
+    async def set_container_env(
+        container: str, values: dict[str, str] | None = None, remove: list[str] | None = None
+    ) -> str:
+        """Set or remove single environment variables and keep all others unchanged.
+        Cosmos replaces the whole env list on update, so this reads the current values on the
+        server side, merges and sends the full list back; values are never returned.
+        values: {"NAME": "value"} to add or change; remove: ["NAME"] to delete.
+        Cosmos recreates the container to apply the change. Nothing is sent if nothing changes."""
+        values = values or {}
+        remove = remove or []
+        if not values and not remove:
+            raise ToolError("give values to set and/or names to remove")
+        cid = _seg(container)
+        inspect = await call("GET", f"/api/servapps/{cid}/", redact_output=False)
+        current = (inspect.get("Config") or {}).get("Env") if isinstance(inspect, dict) else None
+        if not isinstance(current, list):
+            raise ToolError("could not read the container's environment from Cosmos")
+        merged, changes = _merge_env([str(e) for e in current], values, remove)
+        report: dict[str, Any] = {"container": container, **{k: v for k, v in changes.items() if v}}
+        if not (changes["changed"] or changes["added"] or changes["removed"]):
+            report["applied"] = False
+            report["note"] = "nothing to change, container not touched"
+            return _dump(report)
+        result = await call("POST", f"/api/servapps/{cid}/update", body={"envVars": merged})
+        report["applied"] = True
+        report["result"] = result
+        return _dump(report)
+
+    @tool(Level.WRITE, "Set container mounts")
+    async def set_container_mounts(
+        container: str, add: list[dict[str, Any]] | None = None, remove: list[str] | None = None
+    ) -> str:
+        """Add, replace or remove single mounts and keep all others unchanged.
+        add: [{"source": "/host/path" or volume name, "target": "/container/path",
+        "read_only": false, "type": "bind" | "volume" | "tmpfs"}]; an existing target is replaced.
+        remove: ["/container/path", ...] by target. Cosmos replaces the whole mount list and drops
+        old-style binds on update, so this reads all current mounts (binds converted) and sends
+        the full list back. Cosmos recreates the container. Nothing is sent if nothing changes."""
+        add = add or []
+        remove = remove or []
+        if not add and not remove:
+            raise ToolError("give mounts to add and/or targets to remove")
+        cid = _seg(container)
+        inspect = await call("GET", f"/api/servapps/{cid}/", redact_output=False)
+        if not isinstance(inspect, dict):
+            raise ToolError("could not read the container's mounts from Cosmos")
+        current, converted = _current_mounts(inspect)
+        merged, changes = _merge_mounts(current, add, remove)
+        report: dict[str, Any] = {"container": container, **{k: v for k, v in changes.items() if v}}
+        if converted:
+            report["converted_binds"] = converted
+        if not (changes["added"] or changes["replaced"] or changes["removed"]):
+            report["applied"] = False
+            report["note"] = "nothing to change, container not touched"
+            return _dump(report)
+        result = await call("POST", f"/api/servapps/{cid}/update", body={"Volumes": merged})
+        report["applied"] = True
+        report["mounts"] = [
+            f"{m.get('Source', '')} -> {m.get('Target')}{' (ro)' if m.get('ReadOnly') else ''}" for m in merged
+        ]
+        report["result"] = result
+        return _dump(report)
 
     @tool(Level.WRITE, "Create service")
     async def create_service(service: dict[str, Any]) -> str:
@@ -346,7 +534,9 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
 
     @tool(Level.READ, "List backups")
     async def list_backups() -> str:
-        """Backup definitions (restic). Repository passwords are redacted."""
+        """Backup definitions (restic). Repository passwords are redacted. Creating backup
+        definitions is a Cosmos premium feature (BCK001 without a licence); without one this list
+        stays empty and the other backup tools have nothing to work on."""
         return _dump(await call("GET", "/api/backups-config"))
 
     @tool(Level.READ, "List backup snapshots")
@@ -428,6 +618,63 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
     async def stop_job(scheduler: str, name: str) -> str:
         """Stop a running job."""
         return _dump(await call("POST", "/api/jobs/stop", body={"scheduler": scheduler, "name": name}))
+
+    @tool(Level.WRITE, "Create or change scheduled job")
+    async def set_cron_job(
+        name: str,
+        crontab: str | None = None,
+        command: str | None = None,
+        container: str | None = None,
+        enabled: bool | None = None,
+        confirm: bool = False,
+    ) -> str:
+        """Create or change a Cosmos custom scheduled job (shown in list_jobs under "Custom").
+        crontab has six fields including seconds, e.g. "0 0 3 * * *" for 03:00 daily.
+        command runs with `sh -c` as root on the Cosmos host, or inside container if one is set
+        (container="" runs it on the host again). Fields not given keep their current value; a
+        new job needs crontab and command and is enabled unless enabled=false.
+        Creating a job or changing its command or container needs confirm=true, otherwise this
+        returns a preview; changing only crontab or enabled runs directly.
+        To delete a job use cosmos_request DELETE /api/cron/{name} (needs confirm)."""
+        if not name or not name.strip():
+            raise ToolError("name must not be empty")
+        jobs = await call("GET", "/api/cron", redact_output=False)
+        existing = jobs.get(name) if isinstance(jobs, dict) else None
+        if crontab is not None:
+            crontab = _check_crontab(crontab)
+
+        if existing is None:
+            if not crontab or not command:
+                raise ToolError(f"job {name!r} does not exist yet: crontab and command are required")
+            job = {"Enabled": True if enabled is None else enabled, "Name": name, "Crontab": crontab,
+                   "Command": command, "Container": container or ""}
+            needs_confirm = True
+            action = "create"
+        else:
+            job = {
+                "Enabled": existing.get("Enabled", False) if enabled is None else enabled,
+                "Name": name,
+                "Crontab": existing.get("Crontab", "") if crontab is None else crontab,
+                "Command": existing.get("Command", "") if command is None else command,
+                "Container": existing.get("Container", "") if container is None else container,
+            }
+            if all(existing.get(k, "" if k != "Enabled" else False) == v for k, v in job.items()):
+                return _dump({"job": name, "applied": False, "note": "nothing to change"})
+            needs_confirm = job["Command"] != existing.get("Command", "") or job["Container"] != existing.get(
+                "Container", ""
+            )
+            action = "change"
+
+        if needs_confirm and not confirm:
+            where = f"inside container {job['Container']!r}" if job["Container"] else "as root on the Cosmos host"
+            return _dump(
+                preview(f"{action} scheduled job {name!r} that runs its command {where}", redact(job))
+            )
+        if existing is None:
+            result = await call("POST", "/api/cron", body=job)
+        else:
+            result = await call("PUT", f"/api/cron/{_seg(name)}", body=job)
+        return _dump({"job": name, "applied": True, "action": action, "result": result})
 
     # ----------------------------------------------------------------- storage
 

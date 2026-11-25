@@ -54,10 +54,12 @@ _READ_ONLY_POSTS = [
     r"^/api/jobs/get$",
 ]
 
-# Non-GET methods on these paths are destructive (token and user management, and
-# the config endpoint, whose PUT replaces the whole Cosmos configuration).
+# Non-GET methods on these paths are destructive (token and user management, the config
+# endpoint, whose PUT replaces the whole Cosmos configuration, and custom scheduled jobs,
+# whose commands run as root on the host).
 _DESTRUCTIVE_WRITES = [
     r"^/api/config$",
+    r"^/api/cron(/.*)?$",
     r"^/api/api-tokens(/.*)?$",
     r"^/api/users(/.*)?$",
 ]

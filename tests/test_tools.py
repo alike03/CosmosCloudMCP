@@ -11,8 +11,9 @@ DESTRUCTIVE = {
     "restore_backup", "forget_snapshot", "create_api_token", "delete_api_token",
 }
 WRITE = {
-    "container_action", "set_container_auto_update", "update_container_settings", "create_service",
-    "pull_image", "create_route", "update_route", "run_job", "stop_job",
+    "container_action", "set_container_auto_update", "update_container_settings", "set_container_env",
+    "set_container_mounts", "create_service", "pull_image", "create_route", "update_route", "run_job",
+    "stop_job", "set_cron_job",
 }
 
 
@@ -61,6 +62,142 @@ async def test_get_container_redacts_env(server, api):
     )
     out = await call(server, "get_container", container="web")
     assert out["Config"]["Env"] == ["SECRET=***redacted***"]
+
+
+ENV = ["PATH=/usr/bin", "ADMIN_TOKEN=s3cr3t-value", "PORT=3909", "FLAG"]
+
+
+def mock_env(api, env=ENV):
+    api.get("/api/servapps/web/").mock(return_value=httpx.Response(200, json=ok({"Config": {"Env": env}})))
+    return api.post("/api/servapps/web/update").mock(return_value=httpx.Response(200, json=ok("updated")))
+
+
+async def test_set_container_env_merges_and_hides_values(server, api):
+    update = mock_env(api)
+    out = await call(server, "set_container_env", container="web", values={"PORT": "8080", "NEW": "1"}, remove=["FLAG"])
+    body = json.loads(update.calls.last.request.content)
+    assert body == {"envVars": ["PATH=/usr/bin", "ADMIN_TOKEN=s3cr3t-value", "PORT=8080", "NEW=1"]}
+    assert out["changed"] == ["PORT"] and out["added"] == ["NEW"] and out["removed"] == ["FLAG"]
+    assert out["applied"] is True and "s3cr3t" not in json.dumps(out)
+
+
+async def test_set_container_env_no_change_skips_update(server, api):
+    update = mock_env(api)
+    out = await call(server, "set_container_env", container="web", values={"PORT": "3909"}, remove=["MISSING"])
+    assert out["applied"] is False and out["unchanged"] == ["PORT"] and out["not_found"] == ["MISSING"]
+    assert not update.called
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{}, {"values": {"A=B": "x"}}, {"values": {"A": "x"}, "remove": ["A"]}, {"remove": [""]}],
+)
+async def test_set_container_env_rejects_bad_input(server, api, args):
+    update = mock_env(api)
+    with pytest.raises(ToolError):
+        await call(server, "set_container_env", container="web", **args)
+    assert not update.called
+
+
+INSPECT_MOUNTS = {
+    "HostConfig": {
+        "Mounts": [
+            {"Type": "bind", "Source": "/srv/data", "Target": "/data"},
+            {"Type": "bind", "Source": "/srv/old", "Target": "/old", "ReadOnly": True},
+        ],
+        "Binds": ["/srv/conf:/config:ro,z", "cache:/cache"],
+    }
+}
+
+
+def mock_mounts(api):
+    api.get("/api/servapps/web/").mock(return_value=httpx.Response(200, json=ok(INSPECT_MOUNTS)))
+    return api.post("/api/servapps/web/update").mock(return_value=httpx.Response(200, json=ok("updated")))
+
+
+async def test_set_container_mounts_keeps_binds_and_merges(server, api):
+    update = mock_mounts(api)
+    out = await call(
+        server, "set_container_mounts", container="web",
+        add=[{"source": "/srv/new", "target": "/new", "read_only": True},
+             {"source": "/srv/data2", "target": "/data/"}],
+        remove=["/old"],
+    )
+    body = json.loads(update.calls.last.request.content)
+    assert body == {"Volumes": [
+        {"Type": "bind", "Source": "/srv/data2", "Target": "/data", "ReadOnly": False},
+        {"Type": "bind", "Source": "/srv/conf", "Target": "/config", "ReadOnly": True},
+        {"Type": "volume", "Source": "cache", "Target": "/cache", "ReadOnly": False},
+        {"Type": "bind", "Source": "/srv/new", "Target": "/new", "ReadOnly": True},
+    ]}
+    assert out["replaced"] == ["/data"] and out["added"] == ["/new"] and out["removed"] == ["/old"]
+    assert out["converted_binds"] == 2 and out["applied"] is True
+
+
+async def test_set_container_mounts_no_change_skips_update(server, api):
+    update = mock_mounts(api)
+    out = await call(server, "set_container_mounts", container="web",
+                     add=[{"source": "/srv/data", "target": "/data"}], remove=["/missing"])
+    assert out["applied"] is False and out["unchanged"] == ["/data"] and out["not_found"] == ["/missing"]
+    assert not update.called
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{}, {"add": [{"source": "rel/path", "target": "/x"}]}, {"add": [{"source": "/a", "target": "x"}]},
+     {"add": [{"source": "/a", "target": "/x"}], "remove": ["/x"]}, {"add": [{"source": "/a", "target": "/"}]}],
+)
+async def test_set_container_mounts_rejects_bad_input(server, api, args):
+    update = mock_mounts(api)
+    with pytest.raises(ToolError):
+        await call(server, "set_container_mounts", container="web", **args)
+    assert not update.called
+
+
+CRON = {"nightly": {"Enabled": True, "Name": "nightly", "Crontab": "0 0 3 * * *", "Command": "/x.sh", "Container": ""}}
+
+
+def mock_cron(api, jobs=CRON):
+    api.get("/api/cron").mock(return_value=httpx.Response(200, json=ok(jobs)))
+    create = api.post("/api/cron").mock(return_value=httpx.Response(200, json=ok({})))
+    update = api.put("/api/cron/nightly").mock(return_value=httpx.Response(200, json=ok({})))
+    return create, update
+
+
+async def test_set_cron_job_create_needs_confirm(server, api):
+    create, _ = mock_cron(api, {})
+    out = await call(server, "set_cron_job", name="nightly", crontab="0 0 4 * * *", command="/y.sh")
+    assert out["executed"] is False and "as root on the Cosmos host" in out["would"]
+    assert not create.called
+    out = await call(server, "set_cron_job", name="nightly", crontab="0 0 4 * * *", command="/y.sh", confirm=True)
+    assert json.loads(create.calls.last.request.content) == {
+        "Enabled": True, "Name": "nightly", "Crontab": "0 0 4 * * *", "Command": "/y.sh", "Container": ""}
+    assert out["applied"] is True and out["action"] == "create"
+
+
+async def test_set_cron_job_schedule_change_keeps_other_fields(server, api):
+    _, update = mock_cron(api)
+    out = await call(server, "set_cron_job", name="nightly", crontab="0 30 5 * * *")
+    assert json.loads(update.calls.last.request.content) == {
+        "Enabled": True, "Name": "nightly", "Crontab": "0 30 5 * * *", "Command": "/x.sh", "Container": ""}
+    assert out["applied"] is True
+
+
+async def test_set_cron_job_command_change_needs_confirm(server, api):
+    _, update = mock_cron(api)
+    out = await call(server, "set_cron_job", name="nightly", command="/z.sh")
+    assert out["executed"] is False and not update.called
+
+
+async def test_set_cron_job_no_change_and_validation(server, api):
+    create, update = mock_cron(api)
+    out = await call(server, "set_cron_job", name="nightly", crontab="0 0 3 * * *", enabled=True)
+    assert out["applied"] is False
+    with pytest.raises(ToolError, match="six fields"):
+        await call(server, "set_cron_job", name="nightly", crontab="0 3 * * *")
+    with pytest.raises(ToolError, match="required"):
+        await call(server, "set_cron_job", name="other", crontab="0 0 1 * * *")
+    assert not create.called and not update.called
 
 
 async def test_path_segments_are_quoted(server, api):

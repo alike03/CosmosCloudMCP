@@ -38,7 +38,10 @@ Not related to Azure Cosmos DB, the Cosmos blockchain or cosmos.so. See `docs/re
 - `GET /api/config` needs only login; Cosmos masks credentials without permission 40.
 - Restore body: `{snapshotId, target, include?}` (`RestoreBackupRoute` in `src/backups/API.go`), runs as a background job.
 - `manage/remove` uses Docker `RemoveOptions{}`: no force, volumes kept.
-- Container updates (auto-update, `servapps/{id}/update`) keep the old container's entrypoint, healthcheck, env and labels; `envVars` replaces the env list. Image changes must keep the bare names `cosmos-cloud-mcp` and `python` resolvable.
+- Container updates (auto-update, `servapps/{id}/update`) keep the old container's entrypoint, healthcheck, env and labels; `envVars` replaces the env list.
+- `servapps/{id}/update` with `Volumes` sets `HostConfig.Mounts` to that list and empties `HostConfig.Binds` (`src/docker/api_updateContainer.go`); `set_container_mounts` converts binds so they survive.
+- Custom jobs: `GET/POST /api/cron`, `GET/PUT/DELETE /api/cron/{name}`, body `utils.CRONConfig` {Enabled, Name, Crontab, Command, Container}. PUT replaces the whole job (missing `Enabled` becomes false). Crontab has a seconds field (`gocron.CronJob(crontab, true)`); the command runs as `sh -c` on the host as the Cosmos user (root) or via exec in `Container` (`src/cron/api_crud.go`, `src/cron/index.go`).
+- Creating backups (`POST /api/backups`) needs a premium licence (BCK001); listing works without one. Image changes must keep the bare names `cosmos-cloud-mcp` and `python` resolvable.
 - Full spec: `docs/api/openapi-v0.24.0.json`.
 
 ## Rules
