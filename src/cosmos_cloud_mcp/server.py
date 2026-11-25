@@ -162,6 +162,12 @@ def _merge_mounts(
     return merged, changes
 
 
+def _route_field(route: dict[str, Any], key: str) -> Any:
+    """Route field by name, ignoring case: Cosmos returns ``Name``/``Target`` while the spec uses
+    ``name``/``target``, and its Go JSON decoder accepts both."""
+    return next((v for k, v in route.items() if str(k).lower() == key), None)
+
+
 def _check_crontab(crontab: str) -> str:
     """Cosmos parses custom job schedules with a seconds field (six fields) or @descriptors."""
     value = crontab.strip()
@@ -478,7 +484,7 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
         """Create a reverse-proxy route (utils.ProxyRouteConfig). Required: name, target.
         Common keys: mode (SERVAPP, PROXY, STATIC, SPA, REDIRECT), host, useHost, pathPrefix,
         usePathPrefix, authEnabled, description."""
-        if not route.get("name") or not route.get("target"):
+        if not _route_field(route, "name") or not _route_field(route, "target"):
             raise ToolError("route needs at least 'name' and 'target'")
         return _dump(await call("POST", "/api/routes", body=route))
 
@@ -486,7 +492,7 @@ def build_server(settings: Settings, client: CosmosClient | None = None) -> MCPS
     async def update_route(name: str, route: dict[str, Any]) -> str:
         """Replace an existing route with the given full configuration. Call get_route first,
         change the fields and send the whole object back."""
-        if not route.get("name") or not route.get("target"):
+        if not _route_field(route, "name") or not _route_field(route, "target"):
             raise ToolError("route needs the full configuration including 'name' and 'target'")
         return _dump(await call("PUT", f"/api/routes/{_seg(name)}", body=route))
 

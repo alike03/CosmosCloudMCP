@@ -311,6 +311,15 @@ async def test_create_route_validation(server, api):
         await call(server, "create_route", route={"name": "x"})
 
 
+async def test_update_route_accepts_get_route_casing(server, api):
+    put = api.put("/api/routes/web").mock(return_value=httpx.Response(200, json=ok({})))
+    route = {"Name": "web", "Target": "http://web:8080", "Mode": "SERVAPP"}
+    await call(server, "update_route", name="web", route=route)
+    assert json.loads(put.calls.last.request.content) == route
+    with pytest.raises(ToolError, match="target"):
+        await call(server, "update_route", name="web", route={"Name": "web"})
+
+
 async def test_job_body(server, api):
     route = api.post("/api/jobs/run").mock(return_value=httpx.Response(200, json=ok()))
     await call(server, "run_job", scheduler="Restic", name="backup b1")
